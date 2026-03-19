@@ -13,7 +13,7 @@ LOGO_URL = "https://cdn.discordapp.com/attachments/1484252260614537247/148425301
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "VHA Translator - Final Version 2026"
+def home(): return "VHA Translator - Clean & Branded"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
@@ -40,9 +40,9 @@ def detect_language_manually(text):
 
 @bot.event
 async def on_ready():
-    print(f'--- {bot.user.name} ONLINE (VHA BRANDING ACTIVE) ---')
+    print(f'--- {bot.user.name} ONLINE (VHA CLEAN EDITION) ---')
 
-# --- DREISPRACHIGES HILFE MENÜ ---
+# --- DREISPRACHIGES HILFE MENÜ MIT LOGO ---
 @bot.command(name="help")
 async def custom_help(ctx):
     embed = discord.Embed(
@@ -50,7 +50,6 @@ async def custom_help(ctx):
         color=discord.Color.blue(),
         description="Official Alliance Translation Bot"
     )
-    # Allianz Branding
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.set_thumbnail(url=LOGO_URL)
     
@@ -65,8 +64,14 @@ async def custom_help(ctx):
 async def toggle_translate(ctx, status: str):
     global translate_active
     translate_active = (status.lower() == "on")
-    status_msg = "Translation Active / Traduction activée / Aktiviert" if translate_active else "Translation Disabled / Traduction désactivée / Deaktiviert"
-    await ctx.send(f"{'✅' if translate_active else '😴'} **{status_msg}**")
+    
+    # Status-Embed für die Umschaltung (sieht schöner aus)
+    color = discord.Color.green() if translate_active else discord.Color.red()
+    status_text = "Translation Active / Aktiviert" if translate_active else "Translation Disabled / Deaktiviert"
+    
+    embed = discord.Embed(description=f"**{status_text}**", color=color)
+    embed.set_author(name="VHA System", icon_url=LOGO_URL)
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_message(message):
@@ -81,14 +86,14 @@ async def on_message(message):
     if not translate_active or len(text) <= 2:
         return
     
-    # Auto-Ignore
+    # Kurze Wörter ignorieren
     if text.lower() in ["haha", "lol", "ok", "merci", "danke", "thanks", "ja", "oui", "yes"]:
         return
 
     processed_messages.add(message.id)
     if len(processed_messages) > 150: processed_messages.clear()
 
-    # Reply Check
+    # Prüfung auf Antwort (Reply)
     is_reply = False
     replied_text = ""
     if message.reference and message.reference.message_id:
@@ -100,17 +105,16 @@ async def on_message(message):
 
     input_lang = detect_language_manually(text)
     
+    # Ziel-Logik (Wer bekommt welche Sprache?)
     if is_reply:
-        sys_msg = (f"Übersetze in DE (🇩🇪), FR (🇫🇷) und die Sprache von '{replied_text}'. "
-                   "Regel: NUR Übersetzungen. KEINE Erklärungen.")
+        sys_msg = f"Übersetze in DE (🇩🇪) und FR (🇫🇷). Falls der Ursprungstext eine andere Sprache hatte, füge diese hinzu. NUR Übersetzungen."
     elif input_lang == "FR":
-        sys_msg = "Übersetze NUR ins Deutsche (🇩🇪) und Englische (🇬🇧)."
+        sys_msg = "Übersetze NUR ins Deutsche (🇩🇪). Keine Kommentare."
     elif input_lang == "DE":
-        sys_msg = "Übersetze NUR ins Französische (🇫🇷) und Englische (🇬🇧)."
-    elif input_lang == "EN":
-        sys_msg = "Übersetze NUR ins Deutsche (🇩🇪) und Französische (🇫🇷)."
+        sys_msg = "Übersetze NUR ins Französische (🇫🇷). Keine Kommentare."
     else:
-        sys_msg = "Übersetze in DE (🇩🇪), FR (🇫🇷) und EN (🇬🇧). NUR Ergebnisse."
+        # Bei Englisch oder Unbekannt übersetzen wir für alle (DE/FR)
+        sys_msg = "Übersetze in DE (🇩🇪) und FR (🇫🇷). NUR Ergebnisse."
 
     try:
         completion = client.chat.completions.create(
@@ -120,7 +124,7 @@ async def on_message(message):
         )
         result = completion.choices[0].message.content.strip()
         
-        # Filter
+        # Säuberung der Ausgabe
         lines = [line for line in result.split('\n') if not any(x in line.lower() for x in ["sprache ist", "identisch", "bleibt gleich", "original"])]
         final_lines = [line for line in lines if line.replace("🇩🇪", "").replace("🇫🇷", "").replace("🇬🇧", "").strip().lower() != text.lower() and len(line) > 0]
         
