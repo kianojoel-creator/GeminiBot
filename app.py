@@ -10,7 +10,7 @@ from groq import Groq
 app = Flask(__name__)
 @app.route('/')
 def home(): 
-    return "VHA Universal Translator Online"
+    return "VHA Universal Assistant Online"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -39,7 +39,7 @@ async def on_ready():
 async def on_message(message):
     global auto_translate, last_processed_msg
     
-    # 1. Grund-Sperren (Ignoriere Bots & Doppelnachrichten)
+    # Grund-Sperren (Ignoriere Bots & Doppelnachrichten)
     if message.author == bot.user:
         return
     
@@ -48,7 +48,7 @@ async def on_message(message):
         return
     last_processed_msg = current_msg_fingerprint
 
-    # 2. BEFEHLE (DREISPRACHIG)
+    # BEFEHLE (DREISPRACHIG)
     if message.content.lower() in ["!info", "!help"]:
         help_text = (
             "**🌍 VHA Universal Assistant**\n\n"
@@ -91,7 +91,7 @@ async def on_message(message):
                 await message.reply("❌ Error.")
         return
 
-    # 3. UNIVERSAL-ÜBERSETZUNG (MIT FILTER GEGEN SPAM/HAHA)
+    # 4. UNIVERSAL-ÜBERSETZUNG (NUR WENN KEIN BEFEHL & AKTIV)
     if auto_translate and len(message.content) > 3 and not message.content.startswith("!"):
         
         # FILTER: Ignoriere Lacher und kurze Reaktionen (Blacklist)
@@ -105,27 +105,25 @@ async def on_message(message):
             if message.reference and message.reference.message_id:
                 try:
                     ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    context_info = f"\n(Note: This is a reply to: '{ref_msg.content}')"
+                    context_info = f"\n(Context: Reply to: '{ref_msg.content}')"
                 except:
                     pass
 
+            # *** NEUER SYSTEM-PROMPT MIT FRECHEN ANTWORTEN ***
             t_prompt = (
                 f"Task: Smart Translation for VHA.\n"
                 f"Input: '{message.content}'{context_info}\n\n"
-                f"Strict Rules:\n"
-                f"1. ONLY translate if the content has actual meaning.\n"
-                f"2. DO NOT translate laughs, greetings, or single-word reactions.\n"
-                f"3. If Input is German -> Translate to French (start with 🇫🇷).\n"
-                f"4. If Input is French -> Translate to German (start with 🇩🇪).\n"
-                f"5. If Other -> Translate to BOTH German (🇩🇪) and French (🇫🇷).\n"
-                f"6. If it's a reply, use context but translate the 'Input' only.\n"
-                f"7. Answer ONLY with translation and flags. If unnecessary, answer 'SKIP'."
+                f"Rules:\n"
+                f"1. Check if Input is a silly/impossible request (e.g., make coffee, play music like Alexa, do homework).\n"
+                f"2. IF silly: Answer precisely but with a small, witty, and charming joke in all three languages (DE, FR, EN) with flags. Do NOT provide a translation of the actual request. Use emojis. 🤖\n"
+                f"3. IF NOT silly: Translate normally. German -> French (🇩🇪->🇫🇷), French -> German (🇫🇷->🇩🇪), Others -> Both (🇩🇪+🇫🇷).\n"
+                f"4. ONLY output translation or witty answer with flags. No spam."
             )
             
             completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": t_prompt}],
                 model=MODEL_NAME,
-                temperature=0.1
+                temperature=0.2 # Etwas höher für mehr "Kreativität"
             )
             result = completion.choices[0].message.content
             if result and "SKIP" not in result.upper() and len(result) > 2:
