@@ -16,21 +16,21 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# 2. KI Setup
+# 2. KI Setup - Gemini 2.5 Flash (Stand 2026)
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # 3. Discord Setup
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Variable für den Status (Standardmäßig an)
+# Status-Variable für die Automatik
 auto_translate = True
 
 @bot.event
 async def on_ready():
-    print(f'--- BOT IST LIVE ---')
+    print(f'--- BOT 2.5 FLASH ONLINE ---')
     print(f'Eingeloggt als: {bot.user.name}')
     sys.stdout.flush()
 
@@ -40,44 +40,48 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # BEFEHL: AUTO-ÜBERSETZUNG AN
+    # BEFEHLE FÜR STATUS
     if message.content.lower() == "!auto on":
         auto_translate = True
-        await message.reply("✅ **Übersetzung aktiviert!** Ich bin da und helfe euch beim Chatten.")
+        await message.reply("✅ **Übersetzung AKTIVIERT.** Ich helfe euch wieder beim Chatten (DE <-> FR).")
         return
 
-    # BEFEHL: AUTO-ÜBERSETZUNG AUS
     if message.content.lower() == "!auto off":
         auto_translate = False
-        await message.reply("😴 **Übersetzung deaktiviert.** Ich bin jetzt im Standby. Sag `!auto on`, wenn du mich wieder brauchst!")
+        await message.reply("😴 **Übersetzung DEAKTIVIERT.** Ich antworte jetzt nur noch auf `!gemini`.")
         return
 
-    # Direkte KI-Anfrage mit !gemini (funktioniert immer)
+    # 4. DIREKTE KI-ANFRAGE
     if message.content.lower().startswith("!gemini"):
         query = message.content[7:].strip()
+        if not query:
+            await message.reply("Frag mich etwas!")
+            return
+
         async with message.channel.typing():
             try:
                 response = model.generate_content(query)
-                await message.reply(response.text)
+                if response and response.text:
+                    await message.reply(response.text)
             except Exception as e:
-                await message.reply(f"Fehler: {e}")
+                await message.reply(f"KI Fehler: {e}")
         return
 
-    # INTELLIGENTE AUTO-ÜBERSETZUNG (nur wenn auto_translate auf True ist)
+    # 5. AUTO-ÜBERSETZUNG (Zwei-Wege)
+    # Nur aktiv, wenn auto_translate True ist und kein Befehl genutzt wurde
     if auto_translate and len(message.content) > 2 and not message.content.startswith("!"):
         try:
             prompt = (
-                f"Handle als Übersetzer. Wenn der Text DEUTSCH ist, übersetze ihn ins FRANZÖSISCHE. "
-                f"Wenn der Text FRANZÖSISCH ist, übersetze ihn ins DEUTSCHE. "
-                f"Wenn es eine andere Sprache ist oder kein Sinn ergibt, antworte NUR mit 'SKIP'. "
-                f"Hier ist der Text: {message.content}"
+                f"Übersetze Deutsch nach Französisch oder Französisch nach Deutsch. "
+                f"Antworte NUR mit dem Wort 'SKIP', wenn der Text bereits verständlich ist, "
+                f"eine Mischung beider Sprachen ist oder keine Übersetzung braucht. "
+                f"Text: {message.content}"
             )
-            
             async with message.channel.typing():
                 response = model.generate_content(prompt)
                 if response.text and "SKIP" not in response.text.upper():
                     await message.reply(f"🔄 {response.text}")
-        except Exception:
+        except:
             pass
 
 if __name__ == "__main__":
