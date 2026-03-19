@@ -7,13 +7,13 @@ from groq import Groq
 import re
 
 # ==========================================================
-# DEIN LOGO-LINK (Discord-CDN)
+# DEIN LOGO-LINK
 LOGO_URL = "https://cdn.discordapp.com/attachments/1484252260614537247/1484253018533662740/Picsart_26-03-18_13-55-24-994.png?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&" 
 # ==========================================================
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "VHA Translator - Clean & Branded"
+def home(): return "VHA Translator - Clean Edition"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
@@ -30,33 +30,23 @@ processed_messages = set()
 
 def detect_language_manually(text):
     t = text.lower()
-    if any(re.search(rf'\b{w}\b', t) for w in ["c'est", "oui", "je", "suis", "pas", "le", "la", "et", "que", "pour", "est", "dans"]):
+    if any(re.search(rf'\b{w}\b', t) for w in ["c'est", "oui", "je", "suis", "pas", "le", "la", "et", "que", "pour", "est"]):
         return "FR"
-    if any(re.search(rf'\b{w}\b', t) for w in ["ist", "ja", "ich", "bin", "nicht", "das", "die", "und", "dass", "für", "mit", "auch"]):
+    if any(re.search(rf'\b{w}\b', t) for w in ["ist", "ja", "ich", "bin", "nicht", "das", "die", "und", "dass", "für", "mit"]):
         return "DE"
-    if any(re.search(rf'\b{w}\b', t) for w in ["is", "the", "and", "have", "you", "this", "with", "what", "good"]):
-        return "EN"
     return "UNKNOWN"
 
 @bot.event
 async def on_ready():
-    print(f'--- {bot.user.name} ONLINE (VHA CLEAN EDITION) ---')
+    print(f'--- {bot.user.name} ONLINE ---')
 
-# --- DREISPRACHIGES HILFE MENÜ MIT LOGO ---
 @bot.command(name="help")
 async def custom_help(ctx):
-    embed = discord.Embed(
-        title="VHA Translator - Help / Aide / Hilfe", 
-        color=discord.Color.blue(),
-        description="Official Alliance Translation Bot"
-    )
+    embed = discord.Embed(title="VHA Translator - Hilfe", color=discord.Color.blue())
     embed.set_author(name="VHA ALLIANCE", icon_url=LOGO_URL)
     embed.set_thumbnail(url=LOGO_URL)
-    
     embed.add_field(name="🇩🇪 Deutsch", value="`!translate on/off`: Automatik an/aus\n`!ai [Frage]`: KI direkt fragen", inline=False)
-    embed.add_field(name="🇫🇷 Français", value="`!translate on/off`: Activer/Désactiver\n`!ai [Question]`: Demander à l'IA", inline=False)
-    embed.add_field(name="🇬🇧 English", value="`!translate on/off`: Toggle translation\n`!ai [Question]`: Ask the AI", inline=False)
-    
+    embed.add_field(name="🇫🇷 Français", value="`!translate on/off`: Activer/Désactiver\n`!ai [Question]`: Poser une question", inline=False)
     embed.set_footer(text="VHA - Powering Communication", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
@@ -65,71 +55,50 @@ async def toggle_translate(ctx, status: str):
     global translate_active
     translate_active = (status.lower() == "on")
     
-    # Status-Embed für die Umschaltung (sieht schöner aus)
+    # Einheitliches Design für ON und OFF
     color = discord.Color.green() if translate_active else discord.Color.red()
-    status_text = "Translation Active / Aktiviert" if translate_active else "Translation Disabled / Deaktiviert"
+    status_de = "Übersetzung Aktiviert" if translate_active else "Übersetzung Deaktiviert"
+    status_fr = "Traduction Activée" if translate_active else "Traduction Désactivée"
     
-    embed = discord.Embed(description=f"**{status_text}**", color=color)
+    embed = discord.Embed(
+        description=f"**{status_de}**\n*{status_fr}*", 
+        color=color
+    )
     embed.set_author(name="VHA System", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
 @bot.event
 async def on_message(message):
     global processed_messages, translate_active
-    if message.author == bot.user or message.id in processed_messages:
-        return
+    if message.author == bot.user or message.id in processed_messages: return
     if message.content.startswith("!"):
         await bot.process_commands(message)
         return
     
     text = message.content.strip()
-    if not translate_active or len(text) <= 2:
-        return
-    
-    # Kurze Wörter ignorieren
-    if text.lower() in ["haha", "lol", "ok", "merci", "danke", "thanks", "ja", "oui", "yes"]:
-        return
+    if not translate_active or len(text) <= 2: return
+    if text.lower() in ["haha", "lol", "ok", "merci", "danke", "ja", "oui"]: return
 
     processed_messages.add(message.id)
     if len(processed_messages) > 150: processed_messages.clear()
 
-    # Prüfung auf Antwort (Reply)
-    is_reply = False
-    replied_text = ""
-    if message.reference and message.reference.message_id:
-        try:
-            replied_to = await message.channel.fetch_message(message.reference.message_id)
-            replied_text = replied_to.content
-            is_reply = True
-        except: pass
-
     input_lang = detect_language_manually(text)
     
-    # Ziel-Logik (Wer bekommt welche Sprache?)
-    if is_reply:
-        sys_msg = f"Übersetze in DE (🇩🇪) und FR (🇫🇷). Falls der Ursprungstext eine andere Sprache hatte, füge diese hinzu. NUR Übersetzungen."
-    elif input_lang == "FR":
+    if input_lang == "FR":
         sys_msg = "Übersetze NUR ins Deutsche (🇩🇪). Keine Kommentare."
     elif input_lang == "DE":
         sys_msg = "Übersetze NUR ins Französische (🇫🇷). Keine Kommentare."
     else:
-        # Bei Englisch oder Unbekannt übersetzen wir für alle (DE/FR)
-        sys_msg = "Übersetze in DE (🇩🇪) und FR (🇫🇷). NUR Ergebnisse."
+        return # Andere Sprachen ohne Reply ignorieren
 
     try:
         completion = client.chat.completions.create(
-            messages=[{"role": "system", "content": "Du bist ein stummer Übersetzer. Gib nur Zieltexte aus."},
+            messages=[{"role": "system", "content": "Du bist ein stummer Übersetzer."},
                       {"role": "user", "content": f"{sys_msg}\n\nText: {text}"}],
             model=MODEL_NAME, temperature=0.0
         )
-        result = completion.choices[0].message.content.strip()
-        
-        # Säuberung der Ausgabe
-        lines = [line for line in result.split('\n') if not any(x in line.lower() for x in ["sprache ist", "identisch", "bleibt gleich", "original"])]
-        final_lines = [line for line in lines if line.replace("🇩🇪", "").replace("🇫🇷", "").replace("🇬🇧", "").strip().lower() != text.lower() and len(line) > 0]
-        
-        output = "\n".join(final_lines).strip()
-        if output:
+        output = completion.choices[0].message.content.strip()
+        if output and output.lower() != text.lower():
             await message.reply(output)
     except: pass
 
