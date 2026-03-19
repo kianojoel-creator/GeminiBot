@@ -42,7 +42,6 @@ def home():
 # ────────────────────────────────────────────────
 
 def detect_language_simple(text: str) -> str:
-def detect_language_simple(text: str) -> str:
     """
     Sehr tolerante Erkennung für Discord-Chat (kurze Sätze + Slang)
     """
