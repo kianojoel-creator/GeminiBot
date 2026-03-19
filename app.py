@@ -10,7 +10,7 @@ from groq import Groq
 app = Flask(__name__)
 @app.route('/')
 def home(): 
-    return "VHA Assistant Online"
+    return "VHA Universal Assistant Online"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -29,10 +29,9 @@ auto_translate = True
 
 @bot.event
 async def on_ready():
-    # Setzt den Status in Discord (International)
-    activity = discord.Game(name="VHA Guard | !info", type=3)
+    activity = discord.Game(name="VHA Universal Translator", type=3)
     await bot.change_presence(status=discord.Status.online, activity=activity)
-    print(f'--- {bot.user.name} (VHA) IS ONLINE ---')
+    print(f'--- {bot.user.name} (VHA) ONLINE ---')
     sys.stdout.flush()
 
 @bot.event
@@ -41,82 +40,69 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # HILFE / INFO (DREISPRACHIG)
+    # BEFEHLE (DREISPRACHIG)
     if message.content.lower() in ["!info", "!help"]:
         help_text = (
-            "**🚀 VHA Assistant**\n\n"
-            "🇩🇪 **DE:** Ich unterstütze diesen Server mit KI-Power.\n"
-            "🇫🇷 **FR:** J'assiste ce serveur avec la puissance de l'IA.\n"
-            "🇺🇸 **EN:** I assist this server with AI power.\n\n"
-            "**Commands / Commandes:**\n"
-            "`!ai [Text]` - AI Chat (Llama-3.3)\n"
-            "`!auto on/off` - Auto Translate DE ↔ FR\n"
-            "`!status` - System Status"
+            "**🌍 VHA Universal Assistant**\n\n"
+            "🇩🇪 **DE:** Automatische Übersetzung für alle Sprachen.\n"
+            "🇫🇷 **FR:** Traduction automatique pour toutes les langues.\n"
+            "🇺🇸 **EN:** Automatic translation for all languages.\n\n"
+            "`!ai [Text]` - AI Chat | `!auto on/off` - Toggle | `!status`"
         )
         await message.reply(help_text)
         return
 
-    # STATUS (DREISPRACHIG)
     if message.content.lower() == "!status":
-        state_de = "AKTIV ✅" if auto_translate else "PAUSIERT 😴"
-        state_fr = "ACTIF ✅" if auto_translate else "EN PAUSE 😴"
-        state_en = "ACTIVE ✅" if auto_translate else "PAUSED 😴"
-        
-        status_msg = (
-            f"🇩🇪 System: {state_de}\n"
-            f"🇫🇷 Système: {state_fr}\n"
-            f"🇺🇸 System: {state_en}"
-        )
-        await message.reply(status_msg)
+        s = "AKTIV ✅ / ACTIF ✅ / ACTIVE ✅" if auto_translate else "OFF 😴"
+        await message.reply(f"🛰️ **System Status:** {s}")
         return
 
-    # ÜBERSETZUNG AN/AUS (DREISPRACHIG ANGEPASST)
     if message.content.lower() == "!auto on":
         auto_translate = True
-        msg = (
-            "✅ **Übersetzung aktiviert!**\n"
-            "🇫🇷 Traduction activée !\n"
-            "🇺🇸 Translation activated!"
-        )
-        await message.reply(msg)
+        await message.reply("✅ **Translator ON** (DE/FR/Global)")
         return
         
     if message.content.lower() == "!auto off":
         auto_translate = False
-        msg = (
-            "😴 **Übersetzung pausiert.**\n"
-            "🇫🇷 Traduction en pause.\n"
-            "🇺🇸 Translation paused."
-        )
-        await message.reply(msg)
+        await message.reply("😴 **Translator OFF**")
         return
 
-    # ALLGEMEINE KI ANFRAGE
+    # KI ANFRAGE
     if message.content.lower().startswith("!ai "):
         query = message.content[4:].strip()
         async with message.channel.typing():
             try:
-                # KI antwortet in der Sprache des Users
                 chat_completion = client.chat.completions.create(
-                    messages=[{"role": "system", "content": "You are the VHA Assistant. Answer precisely in the language the user is speaking (German, French, or English)."},
+                    messages=[{"role": "system", "content": "You are the VHA Assistant. Answer in the user's language."},
                               {"role": "user", "content": query}],
                     model=MODEL_NAME,
                     temperature=0.6
                 )
                 await message.reply(chat_completion.choices[0].message.content)
-            except Exception as e:
-                print(f"Error: {e}")
-                await message.reply("❌ System-Error.")
+            except:
+                await message.reply("❌ Error.")
         return
 
-    # 4. AUTOMATISCHE ÜBERSETZUNG (DE <-> FR)
-    if auto_translate and len(message.content) > 3 and not message.content.startswith("!"):
+    # 4. UNIVERSAL-ÜBERSETZUNG MIT REPLY-LOGIK
+    if auto_translate and len(message.content) > 2 and not message.content.startswith("!"):
         try:
+            # Check ob es eine Antwort auf eine andere Nachricht ist
+            context_text = ""
+            if message.reference and message.reference.message_id:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                context_text = f" (Context of replied message: {ref_msg.content})"
+
             t_prompt = (
-                f"Translate briefly: French -> German (start with 🇩🇪) or German -> French (start with 🇫🇷). "
-                f"Answer ONLY with the translation. Answer 'SKIP' if no translation is needed. "
-                f"Text: {message.content}"
+                f"You are a universal translator for the VHA Discord server. "
+                f"Input Text: '{message.content}'{context_text}. "
+                f"Rules: "
+                f"1. If Input is German -> Translate to French (start with 🇫🇷). "
+                f"2. If Input is French -> Translate to German (start with 🇩🇪). "
+                f"3. If Input is ANY OTHER language (English, Spanish, etc.) -> Translate to BOTH German (🇩🇪) and French (🇫🇷). "
+                f"4. If it's a reply, use the context to ensure the translation makes sense. "
+                f"5. Answer ONLY with the translation(s). If it's just emojis or noise, answer 'SKIP'."
             )
+            
             completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": t_prompt}],
                 model=MODEL_NAME,
@@ -125,8 +111,8 @@ async def on_message(message):
             result = completion.choices[0].message.content
             if result and "SKIP" not in result.upper():
                 await message.reply(result)
-        except:
-            pass
+        except Exception as e:
+            print(f"Translation Error: {e}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
