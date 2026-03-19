@@ -4,159 +4,103 @@ import os
 from flask import Flask
 import threading
 from groq import Groq
+import re
 
-# ────────────────────────────────────────────────
-#  Webserver für Render (Keep-Alive)
-# ────────────────────────────────────────────────
+# 1. Webserver für Render
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "VHA Translator - Strict Mode 2026"
+def home(): return "VHA Translator - Reply Logic 2026"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-# ────────────────────────────────────────────────
-#  Groq / KI Setup
-# ────────────────────────────────────────────────
+# 2. KI Setup
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-MODEL_NAME = "llama-3.3-70b-versatile"          # oder llama-3.1-70b je nach Verfügbarkeit
+MODEL_NAME = "llama-3.3-70b-versatile"
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Gegen Echo / Doppelverarbeitung
 processed_messages = set()
+
+def detect_language_manually(text):
+    """Prüft auf typische Wörter für DE/FR"""
+    t = text.lower()
+    if any(re.search(rf'\b{w}\b', t) for w in ["c'est", "oui", "je", "suis", "pas", "le", "la", "et", "que", "pour"]):
+        return "FR"
+    if any(re.search(rf'\b{w}\b', t) for w in ["ist", "ja", "ich", "bin", "nicht", "das", "die", "und", "dass", "für"]):
+        return "DE"
+    return "UNKNOWN"
 
 @bot.event
 async def on_ready():
-    await bot.change_presence(activity=discord.Game(name="🌍 DE ↔ FR Übersetzer"))
-    print(f'--- {bot.user.name} ONLINE | Strict Mode ---')
+    print(f'--- {bot.user.name} MIT REPLY-LOGIK ONLINE ---')
 
 @bot.event
 async def on_message(message):
     global processed_messages
-    
     if message.author == bot.user or message.id in processed_messages:
         return
-    
     processed_messages.add(message.id)
-    if len(processed_messages) > 150:
-        processed_messages.clear()
+    if len(processed_messages) > 150: processed_messages.clear()
 
-    # ────────────────────────────────────────────────
-    # 1. Freie KI-Antwort mit !ai
-    # ────────────────────────────────────────────────
+    # !ai Befehl
     if message.content.lower().startswith("!ai "):
         query = message.content[4:].strip()
         async with message.channel.typing():
             try:
-                chat_res = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "Antworte kurz in der Sprache des Users. Bei Unsinn/Witzen/Kaffee-Anfragen → kurz, witzig, dreisprachig mit Flaggen."},
-                        {"role": "user", "content": query}
-                    ],
-                    model=MODEL_NAME,
-                    temperature=0.7,
-                    max_tokens=400
+                res = client.chat.completions.create(
+                    messages=[{"role": "system", "content": "Antworte kurz und witzig."},
+                              {"role": "user", "content": query}],
+                    model=MODEL_NAME, temperature=0.7
                 )
-                await message.reply(chat_res.choices[0].message.content)
-            except Exception as e:
-                print(f"!ai Fehler: {e}")
+                await message.reply(res.choices[0].message.content)
+            except: pass
         return
 
-    # ────────────────────────────────────────────────
-    # 2. Reine 1:1 Übersetzung – sehr strenger Modus
-    # ────────────────────────────────────────────────
-    if not message.content.startswith("!") and len(message.content.strip()) > 2:
-        low_msg = message.content.lower().strip()
-        blacklist = ["haha", "lol", "xd", "ok", "oui", "ja", "nein", "merci", "danke", "top", "gut", "👍", "👌"]
-        if low_msg in blacklist or len(low_msg) < 3:
-            return
+    # ÜBERSETZUNG MIT REPLY-CHECK
+    text = message.content.strip()
+    if not text.startswith("!") and len(text) > 2:
+        if text.lower() in ["haha", "lol", "ok", "merci", "danke"]: return
 
-        t_prompt = f"""Du bist ein **streng regelkonformer 1:1-Übersetzer**. Du darfst **niemals** vom folgenden Format abweichen.
+        # Prüfe, ob es eine Antwort auf eine andere Sprache ist
+        extra_info = ""
+        if message.reference and message.reference.message_id:
+            try:
+                replied_to = await message.channel.fetch_message(message.reference.message_id)
+                orig_lang = detect_language_manually(replied_to.content)
+                if orig_lang == "UNKNOWN":
+                    extra_info = f"Zusätzlich: Übersetze auch zurück in die Sprache der Nachricht, auf die geantwortet wurde: '{replied_to.content[:50]}...'"
+            except: pass
 
-ABSOLUTE VERBOTS-REGELN – VERLETZE SIE NIE:
-- Keine Erklärungen, Begründungen, Meta-Kommentare, Sätze wie „ist nicht erforderlich“, „da der Input…“, „deshalb“, „korrekte Antwort ist“, „ich gebe nur…“, „Input ist…“, „Regel…“
-- Kein einziges Wort über deine Regeln, den Input oder warum du etwas tust oder nicht tust.
-- Kein „denke laut“, kein Chain-of-Thought sichtbar.
-- Deine **gesamte Antwort** besteht **ausschließlich** aus 1 oder genau 2 Zeilen mit Flagge + Übersetzung. Sonst **gar nichts**.
-
-Regeln (unveränderlich):
-1. Input DEUTSCH          → NUR: 🇫🇷 [Französische Übersetzung]
-2. Input FRANZÖSISCH      → NUR: 🇩🇪 [Deutsche Übersetzung]
-3. Input ANDERE SPRACHE   → genau zwei Zeilen:
-   🇩🇪 [Deutsche Übersetzung]
-   🇫🇷 [Französische Übersetzung]
-
-Weitere HARTE REGELN:
-- Reine, wörtliche Übersetzung – nichts umformulieren, verbessern oder hinzufügen.
-- Wiederhole **niemals** ein Wort des Originals.
-- Nur die Flaggen 🇩🇪 🇫🇷 verwenden – keine anderen Emojis.
-- Antwort = **maximal** 2 Zeilen. Kein zusätzlicher Text davor, dazwischen oder danach.
-
-Text: {message.content}"""
+        input_lang = detect_language_manually(text)
+        
+        # System-Anweisung zusammenbauen
+        if extra_info:
+            sys_msg = f"Du bist ein All-in-One Übersetzer. {extra_info}. Gib IMMER auch DE (🇩🇪) und FR (🇫🇷) aus. Gib NUR die Übersetzungen mit Flaggen aus."
+        elif input_lang == "FR":
+            sys_msg = "Übersetze NUR in Deutsch (🇩🇪). Gib nur Text + Flagge aus."
+        elif input_lang == "DE":
+            sys_msg = "Übersetze NUR in Französisch (🇫🇷). Gib nur Text + Flagge aus."
+        else:
+            sys_msg = "Übersetze in Deutsch (🇩🇪) UND Französisch (🇫🇷). Gib nur die Übersetzungen aus."
 
         try:
             completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": "Du bist ein roboterhafter Übersetzer. Du denkst lautlos. Du schreibst **nur** das exakte geforderte Format. Kein einziges anderes Wort."},
-                    {"role": "user", "content": t_prompt}
-                ],
-                model=MODEL_NAME,
-                temperature=0.0,
-                max_tokens=300
+                messages=[{"role": "system", "content": sys_msg},
+                          {"role": "user", "content": text}],
+                model=MODEL_NAME, temperature=0.0
             )
-            
             result = completion.choices[0].message.content.strip()
             
-            if not result or "SKIP" in result.upper():
-                return
-
-            # ────────────────────────────────────────────────
-            # Verbessertes Cleaning – Meta-Sätze rausfiltern
-            # ────────────────────────────────────────────────
-            forbidden_starts = [
-                "nicht erforderlich", "da der input", "daher ist", "deshalb", "deswegen",
-                "korrekte antwort", "ich gebe", "nur diese", "regel", "regeln", "input ist",
-                "da input", "weil", "denke", "denkprozess"
-            ]
-
-            lines = [line.strip() for line in result.split('\n') if line.strip()]
-            cleaned = []
-
-            original_lower = message.content.lower()
-
-            for line in lines:
-                lower_line = line.lower()
-                
-                # Meta-Sätze komplett ignorieren
-                if any(phrase in lower_line for phrase in forbidden_starts):
-                    continue
-                
-                # Zu ähnlich zum Original → wahrscheinlich Quelltext durchgerutscht
-                clean_content = line.replace("🇩🇪", "").replace("🇫🇷", "").strip().lower()
-                if len(clean_content) > 4:
-                    overlap = sum(1 for w in original_lower.split() if w in clean_content) / max(1, len(original_lower.split()))
-                    if original_lower in clean_content or overlap > 0.65:
-                        continue
-                
-                # Nur Zeilen mit Flagge behalten
-                if '🇩🇪' in line or '🇫🇷' in line:
-                    cleaned.append(line)
-
-            output = '\n'.join(cleaned).strip()
+            # Filter gegen Nachplappern
+            if text.lower() in result.lower() and len(result) > len(text) + 5:
+                result = result.replace(text, "").replace(text.lower(), "").strip()
             
-            if output:
-                await message.reply(output)
-                    
-        except Exception as e:
-            print(f"Übersetzungsfehler: {e}")
-
-    await bot.process_commands(message)
-
+            if result:
+                await message.reply(result)
+        except: pass
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
