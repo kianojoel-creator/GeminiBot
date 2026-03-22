@@ -1,33 +1,38 @@
 # ════════════════════════════════════════════════
 #  Spieler-Cog  •  VHA Alliance  •  Mecha Fire
-#  Spieler-IDs speichern, anzeigen, löschen
-#  Erlaubte Rollen: Administrator, R5, R4
+#  MongoDB für persistente Speicherung
+#  Spieler-IDs bleiben auch nach Neustart erhalten!
 # ════════════════════════════════════════════════
 
 import discord
 from discord.ext import commands
-import json
+from pymongo import MongoClient
 import os
+import logging
 
-DATA_FILE = "spieler.json"
+log = logging.getLogger("VHABot.Spieler")
+
 ALLOWED_ROLES = {"R5", "R4"}
+
+LOGO_URL = (
+    "https://cdn.discordapp.com/attachments/1484252260614537247/"
+    "1484253018533662740/Picsart_26-03-18_13-55-24-994.png"
+    "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
+)
+
+
+# ────────────────────────────────────────────────
+# MongoDB
+# ────────────────────────────────────────────────
+
+def get_col():
+    client = MongoClient(os.getenv("MONGODB_URI"))
+    return client["vhabot"]["spieler"]
 
 
 # ────────────────────────────────────────────────
 # Hilfsfunktionen
 # ────────────────────────────────────────────────
-
-def load_data() -> list:
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f).get("spieler", [])
-
-
-def save_data(spieler: list):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump({"spieler": spieler}, f, indent=2, ensure_ascii=False)
-
 
 def has_permission(member: discord.Member) -> bool:
     if member.guild_permissions.administrator:
@@ -48,23 +53,25 @@ class SpielerCog(commands.Cog):
     # ── !spieler ─────────────────────────────────
     @commands.group(name="spieler", aliases=["joueur", "joueurs", "player", "players", "ids"], invoke_without_command=True)
     async def spieler(self, ctx):
-        """Zeigt alle gespeicherten Spieler-IDs an."""
-        data = load_data()
+        try:
+            col = get_col()
+            data = list(col.find().sort("name", 1))
+        except Exception as e:
+            await ctx.send("❌ Fehler beim Laden der Spieler.")
+            return
 
         if not data:
             await ctx.send(
                 "📭 Keine Spieler gespeichert.\n"
-                "Aucun joueur enregistré."
+                "Aucun joueur enregistré.\n"
+                "Nenhum jogador registrado."
             )
             return
 
-        embed = discord.Embed(
-            title="👥 Spieler-IDs • Mecha Fire",
-            color=0x2ECC71
-        )
+        embed = discord.Embed(title="👥 Spieler-IDs • Mecha Fire", color=0x2ECC71)
 
         lines = []
-        for s in sorted(data, key=lambda x: x["name"].lower()):
+        for s in data:
             lines.append(f"`{s['name']:<15}` ID: `{s['id']}`")
 
         chunk = ""
@@ -72,7 +79,7 @@ class SpielerCog(commands.Cog):
         for line in lines:
             if len(chunk) + len(line) + 1 > 1000:
                 embed.add_field(
-                    name=f"Spieler / Joueurs {field_num}" if field_num > 1 else "Spieler / Joueurs",
+                    name="Spieler / Joueurs / Jogadores" if field_num == 1 else f"... {field_num}",
                     value=chunk,
                     inline=False
                 )
@@ -83,7 +90,7 @@ class SpielerCog(commands.Cog):
 
         if chunk:
             embed.add_field(
-                name=f"Spieler / Joueurs {field_num}" if field_num > 1 else "Spieler / Joueurs",
+                name="Spieler / Joueurs / Jogadores" if field_num == 1 else f"... {field_num}",
                 value=chunk,
                 inline=False
             )
@@ -92,156 +99,113 @@ class SpielerCog(commands.Cog):
         await ctx.send(embed=embed)
 
     # ── !spieler add ──────────────────────────────
-    @spieler.command(name="add", aliases=["hinzufügen", "ajouter"])
+    @spieler.command(name="add", aliases=["hinzufügen", "ajouter", "adicionar"])
     async def spieler_add(self, ctx, name: str, spieler_id: str):
-        """
-        Fügt einen Spieler hinzu.
-        Nutzung: !spieler add NAME ID
-        Beispiel: !spieler add Noxxi 3881385
-        """
         if not has_permission(ctx.author):
             embed = discord.Embed(
-                title="❌ Keine Berechtigung / Pas d'autorisation",
-                description=(
-                    "Nur **Administrator**, **R5** und **R4** dürfen Spieler hinzufügen.\n"
-                    "Seuls les **Administrateur**, **R5** et **R4** peuvent ajouter des joueurs."
-                ),
+                title="❌ Keine Berechtigung / Pas d'autorisation / Sem permissão",
+                description="Nur **Administrator**, **R5** und **R4** dürfen Spieler hinzufügen.",
                 color=0xED4245
             )
             await ctx.send(embed=embed)
             return
 
-        # Nur Zahlen als ID erlauben
         if not spieler_id.isdigit():
-            await ctx.send(
-                "❌ Die ID muss eine Zahl sein.\n"
-                "L'ID doit être un nombre."
-            )
+            await ctx.send("❌ Die ID muss eine Zahl sein. / L'ID doit être un nombre. / O ID deve ser um número.")
             return
 
-        data = load_data()
+        try:
+            col = get_col()
 
-        # Prüfen ob Name oder ID schon existiert
-        for s in data:
-            if s["name"].lower() == name.lower():
-                await ctx.send(
-                    f"⚠️ `{name}` existiert bereits. Zuerst löschen mit `!spieler delete {name}`\n"
-                    f"`{name}` existe déjà. Supprime d'abord avec `!spieler delete {name}`"
-                )
+            # Prüfen ob Name oder ID schon existiert
+            if col.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}}):
+                await ctx.send(f"⚠️ `{name}` existiert bereits. Zuerst löschen mit `!spieler delete {name}`")
                 return
-            if s["id"] == spieler_id:
-                await ctx.send(
-                    f"⚠️ ID `{spieler_id}` ist bereits **{s['name']}** zugeordnet.\n"
-                    f"L'ID `{spieler_id}` est déjà attribuée à **{s['name']}**."
-                )
+            if col.find_one({"id": spieler_id}):
+                existing = col.find_one({"id": spieler_id})
+                await ctx.send(f"⚠️ ID `{spieler_id}` ist bereits **{existing['name']}** zugeordnet.")
                 return
 
-        data.append({"name": name, "id": spieler_id})
-        save_data(data)
+            col.insert_one({"name": name, "id": spieler_id})
+        except Exception as e:
+            await ctx.send("❌ Fehler beim Speichern.")
+            return
 
-        embed = discord.Embed(
-            title="✅ Spieler hinzugefügt / Joueur ajouté",
-            color=0x57F287
-        )
+        embed = discord.Embed(title="✅ Spieler hinzugefügt / Joueur ajouté / Jogador adicionado", color=0x57F287)
         embed.add_field(name="👤 Name", value=name, inline=True)
         embed.add_field(name="🆔 ID", value=spieler_id, inline=True)
-        embed.set_footer(text=f"Hinzugefügt von / Ajouté par {ctx.author.display_name}")
+        embed.set_footer(text=f"Hinzugefügt von / Ajouté par / Adicionado por {ctx.author.display_name}")
         await ctx.send(embed=embed)
 
     @spieler_add.error
     async def add_error(self, ctx, error):
         if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(
-                "❓ Nutzung: `!spieler add NAME ID`\n"
-                "Exemple: `!spieler add Noxxi 3881385`"
-            )
+            await ctx.send("❓ Nutzung: `!spieler add NAME ID`\nExemple: `!spieler add Noxxi 3881385`")
 
     # ── !spieler delete ───────────────────────────
-    @spieler.command(name="delete", aliases=["löschen", "supprimer", "del", "remove"])
+    @spieler.command(name="delete", aliases=["löschen", "supprimer", "del", "remove", "apagar"])
     async def spieler_delete(self, ctx, *, name: str):
-        """
-        Löscht einen Spieler.
-        Nutzung: !spieler delete NAME
-        """
         if not has_permission(ctx.author):
             embed = discord.Embed(
-                title="❌ Keine Berechtigung / Pas d'autorisation",
-                description=(
-                    "Nur **Administrator**, **R5** und **R4** dürfen Spieler löschen.\n"
-                    "Seuls les **Administrateur**, **R5** et **R4** peuvent supprimer des joueurs."
-                ),
+                title="❌ Keine Berechtigung / Pas d'autorisation / Sem permissão",
                 color=0xED4245
             )
             await ctx.send(embed=embed)
             return
 
-        data = load_data()
-        original_len = len(data)
-        data = [s for s in data if s["name"].lower() != name.lower()]
-
-        if len(data) == original_len:
-            await ctx.send(
-                f"⚠️ `{name}` wurde nicht gefunden.\n"
-                f"`{name}` n'a pas été trouvé."
-            )
+        try:
+            col = get_col()
+            result = col.delete_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+        except Exception as e:
+            await ctx.send("❌ Fehler beim Löschen.")
             return
 
-        save_data(data)
+        if result.deleted_count == 0:
+            await ctx.send(f"⚠️ `{name}` nicht gefunden. / `{name}` introuvable. / `{name}` não encontrado.")
+            return
 
         embed = discord.Embed(
-            title="🗑️ Spieler gelöscht / Joueur supprimé",
-            description=f"`{name}` wurde entfernt. / `{name}` a été supprimé.",
+            title=f"🗑️ Spieler gelöscht / Joueur supprimé / Jogador apagado • {name}",
             color=0xED4245
         )
-        embed.set_footer(text=f"Gelöscht von / Supprimé par {ctx.author.display_name}")
+        embed.set_footer(text=f"Gelöscht von / Supprimé par / Apagado por {ctx.author.display_name}")
         await ctx.send(embed=embed)
 
     # ── !spieler suche ────────────────────────────
-    @spieler.command(name="suche", aliases=["search", "chercher", "find", "id"])
+    @spieler.command(name="suche", aliases=["search", "chercher", "find", "id", "pesquisar"])
     async def spieler_suche(self, ctx, *, suche: str):
-        """
-        Sucht einen Spieler nach Name oder ID.
-        Nutzung: !spieler suche NAME oder !spieler suche ID
-        """
-        data = load_data()
-        gefunden = [
-            s for s in data
-            if suche.lower() in s["name"].lower() or suche == s["id"]
-        ]
-
-        if not gefunden:
-            await ctx.send(
-                f"🔍 Kein Spieler mit `{suche}` gefunden.\n"
-                f"Aucun joueur trouvé pour `{suche}`."
-            )
+        try:
+            col = get_col()
+            gefunden = list(col.find({
+                "$or": [
+                    {"name": {"$regex": suche, "$options": "i"}},
+                    {"id": suche}
+                ]
+            }))
+        except Exception as e:
+            await ctx.send("❌ Fehler bei der Suche.")
             return
 
-        embed = discord.Embed(
-            title=f"🔍 Suchergebnis / Résultat • {suche}",
-            color=0x3498DB
-        )
+        if not gefunden:
+            await ctx.send(f"🔍 Kein Spieler mit `{suche}` gefunden. / Aucun joueur trouvé. / Nenhum jogador encontrado.")
+            return
+
+        embed = discord.Embed(title=f"🔍 Suchergebnis / Résultat / Resultado • {suche}", color=0x3498DB)
         for s in gefunden:
-            embed.add_field(
-                name=f"👤 {s['name']}",
-                value=f"🆔 `{s['id']}`",
-                inline=False
-            )
+            embed.add_field(name=f"👤 {s['name']}", value=f"🆔 `{s['id']}`", inline=False)
         await ctx.send(embed=embed)
 
     # ── !spieler help ─────────────────────────────
-    @spieler.command(name="help", aliases=["hilfe", "aide"])
+    @spieler.command(name="help", aliases=["hilfe", "aide", "ajuda"])
     async def spieler_help(self, ctx):
-        embed = discord.Embed(
-            title="👥 Spieler-IDs – Hilfe / Aide",
-            color=0x3498DB
-        )
+        embed = discord.Embed(title="👥 Spieler-IDs – Hilfe / Aide / Ajuda", color=0x3498DB)
         embed.add_field(
             name="🇩🇪 Befehle",
             value=(
-                "`!spieler` – Alle Spieler anzeigen\n"
+                "`!spieler` – Alle anzeigen\n"
                 "`!spieler add NAME ID` – Hinzufügen\n"
                 "`!spieler delete NAME` – Löschen\n"
-                "`!spieler suche NAME/ID` – Suchen\n\n"
+                "`!spieler suche NAME/ID` – Suchen\n"
                 "**Beispiel:** `!spieler add Noxxi 3881385`"
             ),
             inline=False
@@ -249,25 +213,26 @@ class SpielerCog(commands.Cog):
         embed.add_field(
             name="🇫🇷 Commandes",
             value=(
-                "`!joueur` – Afficher tous les joueurs\n"
+                "`!joueur` – Afficher tous\n"
                 "`!joueur ajouter NOM ID` – Ajouter\n"
                 "`!joueur supprimer NOM` – Supprimer\n"
-                "`!joueur chercher NOM/ID` – Rechercher\n\n"
-                "**Exemple:** `!joueur ajouter Noxxi 3881385`"
+                "`!joueur chercher NOM/ID` – Rechercher"
             ),
             inline=False
         )
         embed.add_field(
-            name="🔐 Berechtigung / Permission",
-            value="Administrator, R5, R4",
+            name="🇧🇷 Comandos",
+            value=(
+                "`!jogador` – Ver todos\n"
+                "`!spieler adicionar NOME ID` – Adicionar\n"
+                "`!spieler apagar NOME` – Apagar\n"
+                "`!spieler pesquisar NOME/ID` – Pesquisar"
+            ),
             inline=False
         )
+        embed.add_field(name="🔐 Berechtigung / Permission", value="Administrator, R5, R4", inline=False)
         await ctx.send(embed=embed)
 
-
-# ────────────────────────────────────────────────
-# Setup
-# ────────────────────────────────────────────────
 
 async def setup(bot):
     await bot.add_cog(SpielerCog(bot))
