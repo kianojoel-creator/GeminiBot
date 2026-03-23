@@ -54,12 +54,13 @@ async def extract_and_translate(groq_call_fn, image_b64: str, content_type: str)
                         "type": "text",
                         "text": (
                             "This image is from the mobile game Mecha Fire. "
-                            "Focus especially on: event names, start/end times, rewards, levels, requirements, dates.\n"
-                            "Extract ALL visible text exactly as written.\n\n"
-                            "Reply with VALID JSON ONLY (no markdown, no extra text):\n"
-                            '{"original": "exact text from image", "lang": "ISO code (DE/FR/PT/EN/JA/etc.)", '
+                            "It may show: in-game chat messages, event info, player profiles, alliance info, or any game screen.\n"
+                            "IMPORTANT: Extract ALL visible text including chat bubbles (even on dark backgrounds), player names, ranks, menus, events.\n"
+                            "Read carefully even if text is small or on complex backgrounds.\n\n"
+                            "Reply with VALID JSON ONLY (no markdown):\n"
+                            '{"original": "exact text (use \\n for line breaks)", "lang": "ISO code", '
                             '"de": "German translation", "fr": "French translation", "pt": "Brazilian Portuguese translation"}\n\n'
-                            'If no text visible: {"original": "NOTEXT"}'
+                            'If truly no text: {"original": "NOTEXT"}'
                         )
                     }
                 ]
@@ -108,7 +109,7 @@ class BildUebersetzerCog(commands.Cog):
 
     @commands.command(name="übersetze", aliases=["uebersetze", "traduire", "traduzir", "ocr", "lese", "lire"])
     async def uebersetze_bild(self, ctx):
-        """Liest Text aus einem Bild und übersetzt ihn auf DE, FR und PT."""
+        """Liest Text aus einem oder mehreren Bildern und übersetzt ihn."""
 
         # Cooldown
         now = time.time()
@@ -119,29 +120,29 @@ class BildUebersetzerCog(commands.Cog):
             return
         user_last_image[ctx.author.id] = now
 
-        # Bild suchen
-        image_url = None
+        # Alle Bilder sammeln (eigene Nachricht + Reply)
+        image_urls = []
 
         if ctx.message.attachments:
             for att in ctx.message.attachments:
                 if att.content_type and att.content_type.startswith("image"):
-                    image_url = att.url
-                    break
+                    image_urls.append(att.url)
 
-        if not image_url and ctx.message.reference:
+        if ctx.message.reference:
             ref = ctx.message.reference.resolved
             if isinstance(ref, discord.Message) and ref.attachments:
                 for att in ref.attachments:
                     if att.content_type and att.content_type.startswith("image"):
-                        image_url = att.url
-                        break
+                        image_urls.append(att.url)
 
-        if not image_url:
+        if not image_urls:
             embed = discord.Embed(
                 title="❓ Kein Bild gefunden / Aucune image / Nenhuma imagem",
                 description=(
-                    "Antworte auf ein Bild und tippe `!übersetze`\n"
-                    "Réponds à une image et tape `!traduire`\n"
+                    "Antworte auf ein Bild und tippe `!übersetze`
+"
+                    "Réponds à une image et tape `!traduire`
+"
                     "Responda a uma imagem e digite `!traduzir`"
                 ),
                 color=0xF39C12
@@ -149,18 +150,57 @@ class BildUebersetzerCog(commands.Cog):
             await ctx.send(embed=embed)
             return
 
-        thinking = await ctx.send("🔍 **Lese Bild...** / **Lecture...** / **Lendo...**")
+        total = len(image_urls)
+        thinking = await ctx.send(f"🔍 **Lese {total} Bild(er)...** / **Lecture {total} image(s)...** / **Lendo {total} imagem(ns)...**")
+
+        import asyncio as _asyncio
+
+        async def process_single(url: str, index: int) -> discord.Embed:
+            try:
+                image_b64, content_type = await image_to_base64(url)
+                if not image_b64:
+                    return None
+
+                result = await extract_and_translate(self.groq_call, image_b64, content_type)
+                if not result:
+                    return None
+
+                lang = result.get("lang", "?")
+                title = f"🖼️ Bild {index}/{total}" if total > 1 else "🖼️ Bildübersetzung / Traduction / Tradução"
+                embed = discord.Embed(title=title, color=0x9B59B6)
+
+                if result.get("original"):
+                    embed.add_field(name=f"📝 Original ({lang})", value=result["original"][:1000], inline=False)
+
+                if result.get("de") and lang != "DE":
+                    embed.add_field(name="🇩🇪 Deutsch", value=result["de"][:1000], inline=False)
+                elif lang == "DE":
+                    embed.add_field(name="🇩🇪 Deutsch (Original)", value=result["original"][:1000], inline=False)
+
+                if result.get("fr") and lang != "FR":
+                    embed.add_field(name="🇫🇷 Français", value=result["fr"][:1000], inline=False)
+                elif lang == "FR":
+                    embed.add_field(name="🇫🇷 Français (Original)", value=result["original"][:1000], inline=False)
+
+                if result.get("pt") and lang != "PT":
+                    embed.add_field(name="🇧🇷 Português", value=result["pt"][:1000], inline=False)
+                elif lang == "PT":
+                    embed.add_field(name="🇧🇷 Português (Original)", value=result["original"][:1000], inline=False)
+
+                embed.set_footer(text="VHA Bild-Übersetzer • Mecha Fire")
+                return embed
+            except Exception as e:
+                log.error(f"Bildübersetzungs-Fehler Bild {index}: {e}")
+                return None
 
         try:
-            image_b64, content_type = await image_to_base64(image_url)
+            # Alle Bilder parallel verarbeiten
+            tasks = [process_single(url, i+1) for i, url in enumerate(image_urls)]
+            results = await _asyncio.gather(*tasks)
 
-            if not image_b64:
-                await thinking.edit(content="❌ Bild konnte nicht geladen werden.")
-                return
+            embeds = [r for r in results if r is not None]
 
-            result = await extract_and_translate(self.groq_call, image_b64, content_type)
-
-            if not result:
+            if not embeds:
                 embed = discord.Embed(
                     title="🖼️ Kein Text gefunden / Aucun texte / Nenhum texto",
                     color=0xF39C12
@@ -168,44 +208,20 @@ class BildUebersetzerCog(commands.Cog):
                 await thinking.edit(content=None, embed=embed)
                 return
 
-            lang = result.get("lang", "?")
-            embed = discord.Embed(
-                title="🖼️ Bildübersetzung / Traduction d'image / Tradução de imagem",
-                color=0x9B59B6
-            )
-
-            if result.get("original"):
-                embed.add_field(
-                    name=f"📝 Original ({lang})",
-                    value=result["original"][:1000],
-                    inline=False
-                )
-
-            if result.get("de") and lang != "DE":
-                embed.add_field(name="🇩🇪 Deutsch", value=result["de"][:1000], inline=False)
-            elif lang == "DE":
-                embed.add_field(name="🇩🇪 Deutsch (Original)", value=result["original"][:1000], inline=False)
-
-            if result.get("fr") and lang != "FR":
-                embed.add_field(name="🇫🇷 Français", value=result["fr"][:1000], inline=False)
-            elif lang == "FR":
-                embed.add_field(name="🇫🇷 Français (Original)", value=result["original"][:1000], inline=False)
-
-            if result.get("pt") and lang != "PT":
-                embed.add_field(name="🇧🇷 Português", value=result["pt"][:1000], inline=False)
-            elif lang == "PT":
-                embed.add_field(name="🇧🇷 Português (Original)", value=result["original"][:1000], inline=False)
-
-            embed.set_footer(text="VHA Bild-Übersetzer • Mecha Fire optimiert")
-            await thinking.edit(content=None, embed=embed)
+            # Erstes Embed als Edit, Rest als neue Nachrichten
+            await thinking.edit(content=None, embed=embeds[0])
+            for embed in embeds[1:]:
+                await ctx.send(embed=embed)
 
         except Exception as e:
             log.error(f"Bildübersetzungs-Fehler: {type(e).__name__} - {str(e)}")
             embed = discord.Embed(
                 title="⚠️ Übersetzung fehlgeschlagen",
                 description=(
-                    "Bild konnte nicht verarbeitet werden – versuch es nochmal!\n"
-                    "Impossible de traiter l'image – réessaie!\n"
+                    "Bild konnte nicht verarbeitet werden – versuch es nochmal!
+"
+                    "Impossible de traiter l'image – réessaie!
+"
                     "Não foi possível processar a imagem – tente novamente!"
                 ),
                 color=0xED4245
