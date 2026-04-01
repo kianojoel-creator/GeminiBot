@@ -576,45 +576,25 @@ async def on_message(message: discord.Message):
 
         active_langs = get_active_languages()
 
-        # Ziel-Sprachen bestimmen (ohne die Ausgangssprache)
-        target_langs = []
-        if lang != "DE" and "DE" in active_langs:
-            target_langs.append(("DE", "German", "🇩🇪 Deutsch"))
-        if lang != "FR" and "FR" in active_langs:
-            target_langs.append(("FR", "French", "🇫🇷 Français"))
-        if lang != "PT" and "PT" in active_langs:
-            target_langs.append(("PT", "Brazilian Portuguese", "🇧🇷 Português"))
-        if lang != "EN" and "EN" in active_langs and lang not in ("DE", "FR", "PT"):
-            target_langs.append(("EN", "English", "🇬🇧 English"))
-        if lang != "JA" and "JA" in active_langs and lang not in ("DE", "FR", "PT"):
-            target_langs.append(("JA", "Japanese", "🇯🇵 日本語"))
+        # Alle Ziel-Sprachen bestimmen — gilt für ALLE Ausgangssprachen
+        ALL_LANGS = [
+            ("DE", "German",               "🇩🇪 Deutsch"),
+            ("FR", "French",               "🇫🇷 Français"),
+            ("PT", "Brazilian Portuguese", "🇧🇷 Português"),
+            ("EN", "English",              "🇬🇧 English"),
+            ("JA", "Japanese",             "🇯🇵 日本語"),
+        ]
 
-        # Für Hauptsprachen (DE/FR/PT) alle anderen Hauptsprachen übersetzen
-        if lang in ("DE", "FR", "PT"):
-            tasks = [translate_text(content, t[1]) for t in target_langs]
-            results = await asyncio.gather(*tasks)
-            for (code, lang_name, label), translation in zip(target_langs, results):
-                if translation and translation.lower() != content.lower():
-                    fields.append((label, translation))
+        target_langs = [
+            t for t in ALL_LANGS
+            if t[0] != lang and t[0] in active_langs
+        ]
 
-        else:
-            # Gast → immer DE + FR + aktive optionale Sprachen
-            guest_targets = [
-                ("DE", "German", "🇩🇪 Deutsch"),
-                ("FR", "French", "🇫🇷 Français"),
-            ]
-            if "PT" in active_langs:
-                guest_targets.append(("PT", "Brazilian Portuguese", "🇧🇷 Português"))
-            if "EN" in active_langs and lang != "EN":
-                guest_targets.append(("EN", "English", "🇬🇧 English"))
-            if "JA" in active_langs and lang != "JA":
-                guest_targets.append(("JA", "Japanese", "🇯🇵 日本語"))
-
-            tasks = [translate_text(content, t[1]) for t in guest_targets]
-            results = await asyncio.gather(*tasks)
-            for (code, lang_name, label), translation in zip(guest_targets, results):
-                if translation and translation.lower() != content.lower():
-                    fields.append((label, translation))
+        tasks = [translate_text(content, t[1]) for t in target_langs]
+        results = await asyncio.gather(*tasks)
+        for (code, lang_name, label), translation in zip(target_langs, results):
+            if translation and translation.lower() != content.lower():
+                fields.append((label, translation))
 
         # Reply auf Gast → auch in Gastsprache übersetzen
         if reply_target_lang and reply_target_lang not in active_langs:
